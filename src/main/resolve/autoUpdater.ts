@@ -16,12 +16,9 @@ import { checkAdminPrivileges } from '../core/manager'
 import { parse } from '../utils/yaml'
 import * as chromeRequest from '../utils/chromeRequest'
 
-const GITHUB_PROXIES = [
-  'https://gh-proxy.org',
-  'https://ghfast.top',
-  'https://down.clashparty.org',
-  'https://download.mihomo.party'
-]
+const UPDATE_REPO = 'ToruOlenyeva/clash-party'
+
+const GITHUB_PROXIES = ['https://gh-proxy.org', 'https://ghfast.top']
 
 let updateInstallPromise: Promise<void> | undefined
 
@@ -36,9 +33,16 @@ interface GitHubRelease {
 
 function buildDownloadUrls(githubUrl: string, proxyPref = ''): string[] {
   if (proxyPref === 'direct') return [githubUrl]
-  if (proxyPref && proxyPref !== 'auto') return [`${proxyPref}/${githubUrl}`]
-  // auto: try each proxy then fall back to direct
-  return [...GITHUB_PROXIES.map((p) => `${p}/${githubUrl}`), githubUrl]
+  if (
+    proxyPref &&
+    proxyPref !== 'auto' &&
+    !proxyPref.includes('clashparty.org') &&
+    !proxyPref.includes('mihomo.party')
+  ) {
+    return [`${proxyPref}/${githubUrl}`]
+  }
+  // auto: 优先走本地代理直连 GitHub，失败则回退通用加速源
+  return [githubUrl, ...GITHUB_PROXIES.map((p) => `${p}/${githubUrl}`)]
 }
 
 async function tryDownload(
@@ -77,7 +81,7 @@ async function getGitHubAssetSha256(
 ): Promise<string> {
   const releaseTag = encodeURIComponent(`v${version}`)
   const res = await chromeRequest.get<GitHubRelease>(
-    `https://api.github.com/repos/mihomo-party-org/mihomo-party/releases/tags/${releaseTag}`,
+    `https://api.github.com/repos/${UPDATE_REPO}/releases/tags/${releaseTag}`,
     {
       headers: {
         Accept: 'application/vnd.github+json',
@@ -99,8 +103,7 @@ async function getGitHubAssetSha256(
 export async function checkUpdate(): Promise<IAppVersion | undefined> {
   const [{ 'mixed-port': mixedPort = DEFAULT_MIHOMO_PORTS.mixed }, { githubProxy = '' }] =
     await Promise.all([getControledMihomoConfig(), getAppConfig()])
-  const githubUrl =
-    'https://github.com/mihomo-party-org/mihomo-party/releases/latest/download/latest.yml'
+  const githubUrl = `https://github.com/${UPDATE_REPO}/releases/latest/download/latest.yml`
   const res = await tryDownload(buildDownloadUrls(githubUrl, githubProxy), {
     headers: { 'Content-Type': 'application/octet-stream' },
     proxy: updaterProxy(mixedPort),
@@ -150,7 +153,7 @@ export function downloadAndInstallUpdate(version: string): Promise<void> {
 async function installUpdate(version: string): Promise<void> {
   const [{ 'mixed-port': mixedPort = DEFAULT_MIHOMO_PORTS.mixed }, { githubProxy = '' }] =
     await Promise.all([getControledMihomoConfig(), getAppConfig()])
-  const githubBase = `https://github.com/mihomo-party-org/mihomo-party/releases/download/v${version}/`
+  const githubBase = `https://github.com/${UPDATE_REPO}/releases/download/v${version}/`
   const fileMap = {
     'win32-x64': `clash-party-windows-${version}-x64-setup.exe`,
     'win32-ia32': `clash-party-windows-${version}-ia32-setup.exe`,
