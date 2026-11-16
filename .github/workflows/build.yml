@@ -91,7 +91,7 @@ jobs:
             else
               PATCH_NUM=1
               while true; do
-                CANDIDATE="${BASE_VER}.${PATCH_NUM}"
+                CANDIDATE="${BASE_VER}-r.${PATCH_NUM}"
                 CHECK_ID=$(curl -s -H "Authorization: token $GH_TOKEN" \
                   "https://api.github.com/repos/${{ github.repository }}/releases/tags/v$CANDIDATE" | jq -r '.id // empty')
                 if [ -z "$CHECK_ID" ]; then
@@ -119,17 +119,18 @@ jobs:
           fetch-depth: 0
 
       - name: Merge latest upstream smart_core
+        shell: bash
         run: |
+          set +e
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote add upstream https://github.com/mihomo-party-org/clash-party.git 2>$null
+          git remote add upstream https://github.com/mihomo-party-org/clash-party.git 2>/dev/null || true
           git fetch upstream smart_core
           git merge --no-edit -X ours upstream/smart_core
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "Upstream merge encountered conflict, aborting merge and keeping custom smart_core"
-            git merge --abort 2>$null
-          }
-          $global:LASTEXITCODE = 0
+          if [ $? -ne 0 ]; then
+            echo "Upstream merge encountered conflict, aborting merge and keeping custom smart_core"
+            git merge --abort 2>/dev/null || true
+          fi
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -140,17 +141,17 @@ jobs:
           node-version: 22
           cache: 'pnpm'
 
-      - name: Set Release Version in package.json
-        env:
-          TARGET_VERSION: ${{ needs.sync-and-check.outputs.release_version }}
-        run: |
-          node -e "const fs=require('fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); pkg.version=process.env.TARGET_VERSION; fs.writeFileSync('package.json', JSON.stringify(pkg,null,2)+'\n');"
-
       - name: Install Dependencies
         env:
           npm_config_arch: x64
           npm_config_target_arch: x64
         run: pnpm install
+
+      - name: Set Release Version in package.json
+        env:
+          TARGET_VERSION: ${{ needs.sync-and-check.outputs.release_version }}
+        run: |
+          node -e "const fs=require('fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); pkg.version=process.env.TARGET_VERSION; fs.writeFileSync('package.json', JSON.stringify(pkg,null,2)+'\n');"
 
       - name: Prepare Sidecars & Assets
         env:
