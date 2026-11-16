@@ -12,6 +12,8 @@ on:
         default: true
         type: boolean
   push:
+    branches:
+      - smart_core
     tags:
       - 'v*'
 
@@ -72,6 +74,22 @@ jobs:
           if [ "$EVENT_NAME" = "push" ] && [[ "$REF_NAME" == v* ]]; then
             SHOULD_BUILD="true"
             TARGET_VER="${REF_NAME#v}"
+          elif [ "$EVENT_NAME" = "push" ] && [ -n "$LATEST_TAG" ]; then
+            LATEST_VER="${LATEST_TAG#v}"
+            LATEST_YML_URL=$(echo "$RELEASE_JSON" | jq -r '.assets[]? | select(.name == "latest.yml") | .browser_download_url // empty')
+            if [ -n "$LATEST_YML_URL" ]; then
+              CURRENT_YML_VER=$(curl -fsSL "$LATEST_YML_URL" | awk -F': ' '/^version:/{print $2; exit}' | tr -d "\"'\r ")
+              echo "已发布 latest.yml 当前 version: ${CURRENT_YML_VER:-未知} (期望: $LATEST_VER)"
+              if [ -n "$CURRENT_YML_VER" ] && [ "$CURRENT_YML_VER" != "$LATEST_VER" ]; then
+                echo "检测到已发布 Release ($LATEST_TAG) 的 latest.yml 版本不一致，正在原地修复..."
+                ORIG_SHA=$(echo "$LATEST_BODY" | sed -n 's/.*<!-- upstream-sha: \([a-f0-9]*\) -->.*/\1/p' | head -n 1)
+                REPAIR_SHA="${ORIG_SHA:-$UPSTREAM_SHA}"
+                TARGET_VERSION="$LATEST_VER" UPSTREAM_SHA="$REPAIR_SHA" GITHUB_REPOSITORY="${{ github.repository }}" node scripts/updater.mjs || exit 1
+                gh release upload "$LATEST_TAG" latest.yml --clobber --repo "${{ github.repository }}" || exit 1
+                gh release edit "$LATEST_TAG" --notes-file release-notes.md --repo "${{ github.repository }}" || exit 1
+                echo "已完成 $LATEST_TAG 的 latest.yml 与 Release 说明原地修复！"
+              fi
+            fi
           elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             SHOULD_BUILD="true"
           elif [ "$EVENT_NAME" = "schedule" ]; then
@@ -179,8 +197,7 @@ jobs:
 
       - name: Generate latest.yml & changelog.md
         env:
-          NODE_ENV: production
-          GITHUB_EVENT_NAME: release
+          TARGET_VERSION: ${{ needs.sync-and-check.outputs.release_version }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           UPSTREAM_SHA: ${{ needs.sync-and-check.outputs.upstream_sha }}
         run: node scripts/updater.mjs
